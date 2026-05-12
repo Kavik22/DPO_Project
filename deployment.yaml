@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magazine
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: magazine
+
+  template:
+    metadata:
+      labels:
+        app: magazine
+
+    spec:
+
+      volumes:
+        - name: app-files
+          emptyDir: {}
+
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+
+      initContainers:
+        - name: copy-app
+          image: ghcr.io/kavik22/magazine-app:latest
+          command:
+            - sh
+            - -c
+            - cp -Ra /var/www/. /shared/
+
+          volumeMounts:
+            - name: app-files
+              mountPath: /shared
+
+      containers:
+
+        #
+        # PHP-FPM
+        #
+        - name: app
+          image: ghcr.io/kavik22/magazine-app:latest
+
+          command: ["php-fpm"]
+
+          ports:
+            - containerPort: 9000
+
+          env:
+            - name: DB_HOST
+              value: "db"
+
+            - name: DB_PORT
+              value: "3306"
+
+            - name: DB_DATABASE
+              value: "magazine"
+
+            - name: DB_USERNAME
+              value: "root"
+
+            - name: DB_PASSWORD
+              value: "root"
+
+            - name: SESSION_DRIVER
+              value: "database"
+
+          volumeMounts:
+            - name: app-files
+              mountPath: /var/www
+
+        #
+        # NGINX
+        #
+        - name: nginx
+          image: nginx:stable-alpine
+
+          ports:
+            - containerPort: 80
+
+          volumeMounts:
+            - name: app-files
+              mountPath: /var/www
+              readOnly: true
+
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: magazine-db
+spec:
+  replicas: 1
+  serviceName: db
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              value: "magazine"
+            - name: MYSQL_ROOT_PASSWORD
+              value: "root"
+          volumeMounts:
+            - name: mysql-storage
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+
